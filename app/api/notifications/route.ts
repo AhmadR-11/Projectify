@@ -1,0 +1,253 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { auth } from '@/lib/auth';
+import { emitNotificationToUsers, emitNotificationToRole, emitNotificationToCampus } from '@/lib/socket-emitters';
+
+// GET - Fetch notifications for the current user (optimized with limit)
+export async function GET(request: NextRequest) {
+  try {
+    const session = await auth();
+    
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+    
+    // Parse query params for pagination
+    const searchParams = request.nextUrl.searchParams;
+    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
+    const offset = parseInt(searchParams.get('offset') || '0');
+
+    // Fetch notifications and unread count in parallel for better performance
+    const [notifications, unreadCount] = await Promise.all([
+      prisma.notificationRecipient.findMany({
+        where: { userId },
+        include: {
+          notification: {
+            select: {
+              notificationId: true,
+              title: true,
+              message: true,
+              type: true,
+              createdAt: true,
+              createdById: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset
+      }),
+      prisma.notificationRecipient.count({
+        where: { userId, isRead: false }
+      })
+    ]);
+
+    return NextResponse.json({
+      notifications: notifications.map((nr: any) => ({
+        id: nr.notification.notificationId,
+        title: nr.notification.title,
+        message: nr.notification.message,
+        type: nr.notification.type,
+        isRead: nr.isRead,
+        readAt: nr.readAt,
+        createdAt: nr.notification.createdAt,
+        createdById: nr.notification.createdById
+      })),
+      unreadCount
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 });
+  }
+}
+
+// POST - Create a new notification (coordinator only)
+export async function POST(request: NextRequest) {
+  try {
+    const session = await auth();
+    
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    if (session.user.role !== 'coordinator') {
+      return NextResponse.json({ error: 'Only coordinators can create notifications' }, { status: 403 });
+    }
+
+    const userId = parseInt(session.user.id);
+    const body = await request.json();
+    const { title, message, type = 'general', targetType, specificUserIds = [], cohort } = body;
+
+    if (!title || !message || !targetType) {
+      return NextResponse.json({ error: 'Title, message, and target type are required' }, { status: 400 });
+    }
+
+    // Get the coordinator's campus
+    const coordinator = await prisma.fYPCoordinator.findUnique({
+      where: { userId: userId }
+    });
+
+    if (!coordinator) {
+      return NextResponse.json({ error: 'Coordinator not found' }, { status: 404 });
+    }
+
+    const campusId = coordinator.campusId;
+
+    // Determine recipients based on target type
+    let recipientIds: number[] = [];
+
+    switch (targetType) {
+      case 'all_users':
+        // Get all students and supervisors on this campus (exclude coordinators)
+        const allStudents = await prisma.student.findMany({
+          where: { campusId },
+          select: { userId: true }
+        });
+        const allSupervisors = await prisma.fYPSupervisor.findMany({
+          where: { campusId },
+          select: { userId: true }
+        });
+        recipientIds = [
+          ...allStudents.map(s => s.userId),
+          ...allSupervisors.map(s => s.userId)
+        ];
+        break;
+
+      case 'all_students':
+        const students = await prisma.student.findMany({
+          where: { 
+            campusId,
+            ...(cohort ? { cohort: cohort as any } : {})
+          },
+          select: { userId: true }
+        });
+        recipientIds = students.map(s => s.userId);
+        break;
+
+      case 'all_supervisors':
+        const supervisors = await prisma.fYPSupervisor.findMany({
+          where: { campusId },
+          select: { userId: true }
+        });
+        recipientIds = supervisors.map(s => s.userId);
+        break;
+
+      case 'specific_users':
+        if (!specificUserIds || specificUserIds.length === 0) {
+          return NextResponse.json({ error: 'Please select at least one user' }, { status: 400 });
+        }
+        // Verify all users are from the same campus
+        const validUsers = await prisma.user.findMany({
+          where: {
+            userId: { in: specificUserIds },
+            OR: [
+              { student: { campusId } },
+              { supervisor: { campusId } }
+            ]
+          },
+          select: { userId: true }
+        });
+        recipientIds = validUsers.map(u => u.userId);
+        break;
+
+      default:
+        return NextResponse.json({ error: 'Invalid target type' }, { status: 400 });
+    }
+
+    if (recipientIds.length === 0) {
+      return NextResponse.json({ error: 'No recipients found for this notification' }, { status: 400 });
+    }
+
+    // Create the notification with recipients
+    const notification = await prisma.notification.create({
+      data: {
+        title,
+        message,
+        type,
+        targetType,
+        targetCohort: cohort || null,
+        createdById: userId,
+        campusId,
+        recipients: {
+          create: recipientIds.map(uid => ({
+            userId: uid
+          }))
+        }
+      },
+      include: {
+        recipients: true
+      }
+    });
+
+    // Emit socket event for real-time delivery
+    try {
+      const socketNotification = {
+        id: notification.notificationId,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        createdAt: notification.createdAt.toISOString(),
+        createdById: notification.createdById ?? undefined,
+      };
+
+      if (targetType === 'all_users') {
+        emitNotificationToCampus(campusId, socketNotification);
+      } else if (targetType === 'all_students') {
+        if (cohort) {
+          emitNotificationToUsers(recipientIds, socketNotification);
+        } else {
+          emitNotificationToRole(campusId, 'student', socketNotification);
+        }
+      } else if (targetType === 'all_supervisors') {
+        emitNotificationToRole(campusId, 'supervisor', socketNotification);
+      } else {
+        emitNotificationToUsers(recipientIds, socketNotification);
+      }
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Notification sent to ${recipientIds.length} user(s)`,
+      notification: {
+        id: notification.notificationId,
+        title: notification.title,
+        recipientCount: notification.recipients.length
+      }
+    });
+  } catch (error) {
+    console.error('Error creating notification:', error);
+    return NextResponse.json({ error: 'Failed to create notification' }, { status: 500 });
+  }
+}
+
+// DELETE - Delete all notifications for the current user (dismiss all from their view)
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await auth();
+    
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+
+    // Delete all notification recipient records for this user
+    const deleted = await prisma.notificationRecipient.deleteMany({
+      where: {
+        userId: userId
+      }
+    });
+
+    return NextResponse.json({ 
+      success: true,
+      deletedCount: deleted.count 
+    });
+  } catch (error) {
+    console.error('Error deleting all notifications:', error);
+    return NextResponse.json({ error: 'Failed to delete notifications' }, { status: 500 });
+  }
+}

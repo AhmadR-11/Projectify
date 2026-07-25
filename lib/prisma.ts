@@ -1,0 +1,76 @@
+import { PrismaClient } from '@prisma/client';
+
+// Force regenerate check - prisma generate was run
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+  prismaShutdownRegistered: boolean | undefined;
+};
+
+// Production flag
+const isProd = process.env.NODE_ENV === 'production';
+
+// Create Prisma client with optimized configuration
+const createPrismaClient = () => {
+  // Only log URL status in development
+  if (!isProd) {
+    console.log('DATABASE_URL status:', process.env.DATABASE_URL ? 'Found' : 'NOT FOUND');
+  }
+
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is not set. Please configure it in Railway.');
+  }
+  
+  // In development, increase pool timeout and slightly increase pool size to reduce P2024 errors
+  const url = process.env.DATABASE_URL;
+  const devUrl = !isProd && url ? `${url}${url.includes('?') ? '&' : '?'}connection_limit=10&pool_timeout=30` : url;
+
+  return new PrismaClient({
+    // Minimal logging in production for performance
+    log: isProd ? [] : ['error', 'warn'],
+    datasources: {
+      db: {
+        url: devUrl,
+      },
+    },
+  });
+};
+
+// Lazy initialization - only create client when first accessed
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient();
+    
+    // Register shutdown handler only once (server-side only)
+    if (typeof window === 'undefined' && !globalForPrisma.prismaShutdownRegistered) {
+      try {
+        if (typeof process !== 'undefined' && typeof process.once === 'function') {
+          globalForPrisma.prismaShutdownRegistered = true;
+          process.once('beforeExit', async () => {
+            if (globalForPrisma.prisma) {
+              await globalForPrisma.prisma.$disconnect();
+            }
+          });
+        }
+      } catch {
+        // Ignore errors in Edge Runtime
+      }
+    }
+  }
+  return globalForPrisma.prisma;
+}
+
+// Export a proxy that lazily initializes the client
+// The schema uses PascalCase model names which Prisma converts to camelCase accessors:
+// model User → prisma.user
+// model FYPCoordinator → prisma.fYPCoordinator
+// model NotificationRecipient → prisma.notificationRecipient
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient();
+    const value = (client as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+    return value;
+  },
+});

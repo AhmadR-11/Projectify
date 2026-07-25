@@ -1,0 +1,453 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { emitEvaluationComment } from '@/lib/socket-emitters';
+import { isGroupCompleted } from '@/lib/cohort-utils';
+
+// GET - Fetch group details for a panel assignment (phase submissions and scores)
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { panelId: string; groupId: string } }
+) {
+  try {
+    const session = await auth();
+    if (!session?.user || session.user.role !== 'supervisor') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+    const panelId = parseInt(params.panelId);
+    const groupId = parseInt(params.groupId);
+
+    // Verify the supervisor is a member of this panel
+    const membership = await prisma.panelMember.findUnique({
+      where: { panelId_supervisorId: { panelId, supervisorId: userId } }
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: 'Not a member of this panel' }, { status: 403 });
+    }
+
+    // Get the assignment
+    const assignment = await (prisma as any).groupPanelAssignment.findUnique({
+      where: { panelId_groupId: { panelId, groupId } },
+    });
+
+    if (!assignment) {
+      return NextResponse.json({ error: 'Assignment not found' }, { status: 404 });
+    }
+
+    // Get group details with project and students
+    const group = await prisma.group.findUnique({
+      where: { groupId },
+      select: {
+        groupId: true,
+        groupName: true,
+        projectId: true,
+        supervisorId: true,
+        students: {
+          select: {
+            userId: true,
+            rollNumber: true,
+            user: { select: { name: true, email: true, profileImage: true } }
+          }
+        }
+      }
+    });
+
+    // Get group's project if exists
+    let project = null;
+    if (group?.projectId) {
+      const p = await (prisma as any).project.findUnique({
+        where: { projectId: group.projectId },
+        select: {
+          projectId: true,
+          title: true,
+          description: true,
+          abstractText: true,
+          category: true,
+          status: true,
+          documentUrl: true,
+          documentName: true,
+          repositoryUrl: true,
+          demoUrl: true,
+        }
+      });
+      project = p;
+    }
+
+    // Fetch panel info to determine fypPhase + cohort for active phase filtering
+    const panel = await (prisma as any).evaluationPanel.findUnique({
+      where: { panelId },
+      select: {
+        fypPhase: true,
+        cohort: true,
+        campusId: true,
+        phaseId: true,
+        phase: {
+          select: {
+            phaseId: true,
+            name: true,
+            weightage: true,
+            isActive: true,
+          }
+        }
+      }
+    });
+
+    // Find the active phase for this panel's FYP+cohort+campus
+    let activePhase: { phaseId: number; name: string; weightage: number } | null = null;
+    let submissionFilter: any = { groupId };
+
+    if (panel) {
+      const activePhaseLookup = await (prisma as any).fypEvaluationPhase.findFirst({
+        where: {
+          campusId: panel.campusId,
+          fypPhase: panel.fypPhase,
+          cohort: panel.cohort,
+          isActive: true,
+        },
+        select: {
+          phaseId: true,
+          name: true,
+          weightage: true,
+        }
+      });
+
+      if (activePhaseLookup) {
+        activePhase = activePhaseLookup;
+        // Filter submissions to only those linked to this active phase
+        submissionFilter = {
+          groupId,
+          phaseId: activePhaseLookup.phaseId,
+        };
+      }
+      // If no active phase exists (phases not set up), fall back to all submissions
+    }
+
+    // Get evaluation submissions for this group, filtered by active phase
+    const submissions = await (prisma as any).evaluationSubmission.findMany({
+      where: submissionFilter,
+      include: {
+        phase: {
+          select: {
+            phaseId: true,
+            name: true,
+            description: true,
+            instructions: true,
+            totalMarks: true,
+            deadline: true,
+            status: true,
+          }
+        },
+        attachments: true
+      },
+      orderBy: { submittedAt: 'desc' }
+    });
+
+    // Fetch submission-level comments (per-submission) and user details
+    const submissionIds = submissions.map((s: any) => s.submissionId);
+    let submissionComments: any[] = [];
+    if (submissionIds.length > 0) {
+      submissionComments = await (prisma as any).submissionComment.findMany({
+        where: { submissionId: { in: submissionIds } },
+        orderBy: { createdAt: 'desc' }
+      });
+    }
+    const submissionCommentUserIds = Array.from(new Set(submissionComments.map((c: any) => c.userId)));
+    const submissionCommentUsers = submissionCommentUserIds.length > 0 ? await prisma.user.findMany({
+      where: { userId: { in: submissionCommentUserIds } },
+      select: { userId: true, name: true, profileImage: true }
+    }) : [];
+    const submissionUserMap = new Map(submissionCommentUsers.map(u => [u.userId, u]));
+
+    // Determine max score from the highest totalMarks across phases, or default 100
+    const maxScore = submissions.length > 0
+      ? Math.max(...submissions.map((s: any) => s.phase?.totalMarks || 100))
+      : 100;
+
+    // Get submitter names
+    const submitterIds: number[] = Array.from(new Set(submissions.map((s: any) => s.submittedById)));
+    const submitters = await prisma.user.findMany({
+      where: { userId: { in: submitterIds as number[] } },
+      select: { userId: true, name: true }
+    });
+    const submitterMap = new Map(submitters.map(u => [u.userId, u.name]));
+
+    // Get panel members with roles to check if current user is chair
+    const panelMembers = await prisma.panelMember.findMany({
+      where: { panelId }
+    });
+    const memberIds = panelMembers.map(pm => pm.supervisorId);
+    const memberUsers = await prisma.user.findMany({
+      where: { userId: { in: memberIds } },
+      select: { userId: true, name: true }
+    });
+    const memberMap = new Map(memberUsers.map(u => [u.userId, u]));
+
+    return NextResponse.json({
+      assignment: {
+        id: assignment.id,
+        evaluationDate: assignment.evaluationDate,
+        timeSlot: assignment.timeSlot,
+        venue: assignment.venue,
+        remarks: assignment.remarks,
+      },
+      maxScore,
+      activePhase,  // null if no phases configured, or the active phase info
+      group: {
+        ...group,
+        students: group?.students.map((s: any) => ({
+          userId: s.userId,
+          name: s.user?.name || 'Unknown',
+          email: s.user?.email || '',
+          rollNumber: s.rollNumber,
+          profileImage: s.user?.profileImage || null,
+        })) || [],
+      },
+      project: project ? {
+        projectId: project.projectId,
+        title: project.title,
+        description: project.description,
+        abstract: project.abstractText,
+        category: project.category,
+        status: project.status,
+        documentUrl: project.documentUrl,
+        documentName: project.documentName,
+        repoUrl: project.repositoryUrl,
+        demoUrl: project.demoUrl,
+      } : null,
+      submissions: submissions.map((s: any) => ({
+        submissionId: s.submissionId,
+        title: s.phase?.name || null,
+        evaluationDescription: s.phase?.description || null,
+        totalMarks: s.phase?.totalMarks || null,
+        dueDate: s.phase?.deadline || null,
+        content: s.content,
+        status: s.status,
+        obtainedMarks: s.obtainedMarks,
+        feedback: s.feedback,
+        submittedAt: s.submittedAt,
+        submittedBy: submitterMap.get(s.submittedById) || 'Unknown',
+        // Supervisor scoring
+        supervisorScore: s.supervisorScore,
+        supervisorFeedback: s.supervisorFeedback,
+        supervisorScoredAt: s.supervisorScoredAt,
+        // Panel scoring
+        panelScore: s.panelScore,
+        panelFeedback: s.panelFeedback,
+        panelScoredAt: s.panelScoredAt,
+        panelMemberScores: s.panelMemberScores || null,
+        attachments: s.attachments.map((a: any) => ({
+          attachmentId: a.attachmentId,
+          fileName: a.fileName,
+          fileUrl: a.fileUrl,
+          fileSize: a.fileSize,
+          fileType: a.fileType,
+        })),
+        // attach submission-specific comments
+        comments: (submissionComments.filter((c: any) => c.submissionId === s.submissionId) || []).map((c: any) => ({
+          commentId: c.commentId,
+          content: c.content,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          userId: c.userId,
+          userName: submissionUserMap.get(c.userId)?.name || 'Unknown',
+          userImage: submissionUserMap.get(c.userId)?.profileImage || null,
+          isOwn: c.userId === userId,
+        })),
+      })),
+      currentUserRole: membership.role,
+      isGroupSupervisor: group?.supervisorId === userId,
+      panelMembers: panelMembers.map(pm => ({
+        supervisorId: pm.supervisorId,
+        role: pm.role,
+        name: memberMap.get(pm.supervisorId)?.name || 'Unknown',
+      })),
+    });
+
+  } catch (error) {
+    console.error('Error fetching group evaluation details:', error);
+    return NextResponse.json({ error: 'Failed to fetch details' }, { status: 500 });
+  }
+}
+
+// POST - Add a phase comment to a group's submission
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { panelId: string; groupId: string } }
+) {
+  try {
+    const session = await auth();
+    if (!session?.user || session.user.role !== 'supervisor') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+    const panelId = parseInt(params.panelId);
+    const groupId = parseInt(params.groupId);
+
+    if (await isGroupCompleted(groupId)) {
+      return NextResponse.json({ error: "Forbidden: This group's FYP is completed." }, { status: 403 });
+    }
+
+    // Verify membership
+    const membership = await prisma.panelMember.findUnique({
+      where: { panelId_supervisorId: { panelId, supervisorId: userId } }
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: 'Not a member of this panel' }, { status: 403 });
+    }
+
+    const { content, submissionId } = await request.json();
+
+    if (!content?.trim()) {
+      return NextResponse.json({ error: 'Comment cannot be empty' }, { status: 400 });
+    }
+
+    if (!submissionId) {
+      return NextResponse.json({ error: 'Submission comment requires a submissionId' }, { status: 400 });
+    }
+
+    const submission = await (prisma as any).evaluationSubmission.findUnique({ where: { submissionId: parseInt(submissionId) } });
+    if (!submission) return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
+
+    const comment = await (prisma as any).submissionComment.create({
+      data: {
+        submissionId: parseInt(submissionId),
+        userId,
+        content: content.trim(),
+      }
+    });
+
+    // Get user details for response
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { name: true, profileImage: true }
+    });
+
+    const commentPayload = {
+      commentId: comment.commentId,
+      content: comment.content,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      userId: comment.userId,
+      userName: user?.name || 'Unknown',
+      userImage: user?.profileImage || null,
+      isOwn: true,
+    };
+
+    // Emit to group students
+    try {
+      const groupStudents = await prisma.student.findMany({
+        where: { groupId },
+        select: { userId: true },
+      });
+      const studentUserIds = groupStudents.map((s) => s.userId);
+      if (studentUserIds.length > 0) {
+        emitEvaluationComment(studentUserIds, {
+          commentId: comment.commentId,
+          panelId,
+          groupId,
+          submissionId: submissionId,
+          content: comment.content,
+          createdAt: comment.createdAt.toISOString(),
+          userId: comment.userId,
+          userName: user?.name || 'Unknown',
+          userImage: user?.profileImage || null,
+        });
+      }
+    } catch (_) {}
+
+    return NextResponse.json({ comment: commentPayload });
+
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    return NextResponse.json({ error: 'Failed to add comment' }, { status: 500 });
+  }
+}
+
+// PATCH - Score a group (panel head only) or update a comment
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { panelId: string; groupId: string } }
+) {
+  try {
+    const session = await auth();
+    if (!session?.user || session.user.role !== 'supervisor') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+    const panelId = parseInt(params.panelId);
+    const groupId = parseInt(params.groupId);
+
+    if (await isGroupCompleted(groupId)) {
+      return NextResponse.json({ error: "Forbidden: This group's FYP is completed." }, { status: 403 });
+    }
+
+    const body = await request.json();
+
+    if (body.action === 'score') {
+      return NextResponse.json({ error: 'Phase scoring is handled on submissions only' }, { status: 400 });
+    }
+
+    // If updating a comment
+    if (body.action === 'updateComment') {
+      const { commentId, content } = body;
+
+      if (!content?.trim()) {
+        return NextResponse.json({ error: 'Comment cannot be empty' }, { status: 400 });
+      }
+
+      const subComment = await (prisma as any).submissionComment.findUnique({ where: { commentId: parseInt(commentId) } });
+      if (subComment) {
+        if (subComment.userId !== userId) return NextResponse.json({ error: 'Cannot edit this comment' }, { status: 403 });
+        const updated = await (prisma as any).submissionComment.update({ where: { commentId: parseInt(commentId) }, data: { content: content.trim() } });
+        return NextResponse.json({ success: true, comment: updated });
+      }
+
+      return NextResponse.json({ error: 'Cannot edit this comment' }, { status: 403 });
+    }
+
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+
+  } catch (error) {
+    console.error('Error updating:', error);
+    return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
+  }
+}
+
+// DELETE - Delete own comment
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { panelId: string; groupId: string } }
+) {
+  try {
+    const session = await auth();
+    if (!session?.user || session.user.role !== 'supervisor') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = parseInt(session.user.id);
+    const groupId = parseInt(params.groupId);
+    if (await isGroupCompleted(groupId)) {
+      return NextResponse.json({ error: "Forbidden: This group's FYP is completed." }, { status: 403 });
+    }
+    const { commentId } = await request.json();
+
+    const subComment = await (prisma as any).submissionComment.findUnique({ where: { commentId: parseInt(commentId) } });
+    if (subComment) {
+      if (subComment.userId !== userId) return NextResponse.json({ error: 'Cannot delete this comment' }, { status: 403 });
+      await (prisma as any).submissionComment.delete({ where: { commentId: parseInt(commentId) } });
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ error: 'Cannot delete this comment' }, { status: 403 });
+
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    return NextResponse.json({ error: 'Failed to delete comment' }, { status: 500 });
+  }
+}
