@@ -35,8 +35,6 @@ pipeline {
     options {
         // Automatically stop build if it takes longer than 20 minutes
         timeout(time: 20, unit: 'MINUTES')
-        // Colorize terminal console output
-        ansiColor('xterm')
         // Keep logs for the last 10 builds only to save disk space
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
