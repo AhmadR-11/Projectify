@@ -33,8 +33,8 @@ pipeline {
     }
 
     options {
-        // Automatically stop build if it takes longer than 20 minutes
-        timeout(time: 20, unit: 'MINUTES')
+        // Automatically stop build if it takes longer than 45 minutes
+        timeout(time: 45, unit: 'MINUTES')
         // Keep logs for the last 10 builds only to save disk space
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
