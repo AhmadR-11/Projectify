@@ -1,0 +1,324 @@
+# ==============================================================================
+# PROJECTIFY — DOCKER COMPOSE FILE
+# ==============================================================================
+#
+# PURPOSE:
+#   Orchestrates 3 containers together so the full app runs with one command:
+#     docker compose up --build
+#
+# CONTAINERS CREATED BY THIS FILE:
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │  Container 1: projectify-app                                                │
+# │    Built from : ./Dockerfile (your custom Next.js + Socket.IO app)         │
+# │    Port       : 3000 → accessible at http://localhost:3000                  │
+# │    Purpose    : Runs the full Projectify web application                    │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │  Container 2: projectify-postgres                                           │
+# │    Image      : postgres:16-alpine (official pre-built image, no Dockerfile)│
+# │    Port       : 5432 (internal only, not exposed to internet)               │
+# │    Purpose    : PostgreSQL database for all app data                        │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │  Container 3: projectify-redis                                              │
+# │    Image      : redis:7-alpine (official pre-built image, no Dockerfile)    │
+# │    Port       : 6379 (internal only, not exposed to internet)               │
+# │    Purpose    : Redis for Socket.IO WebSocket horizontal scaling            │
+# └─────────────────────────────────────────────────────────────────────────────┘
+#
+# ─── SECURITY — HOW CREDENTIALS ARE PROTECTED ────────────────────────────────
+#
+#   ✅ SAFE: This file contains ZERO hardcoded secrets or real credentials.
+#            All secrets are loaded from your local .env file at runtime.
+#
+#   ✅ SAFE: .env is listed in .gitignore → never pushed to GitHub.
+#
+#   ✅ SAFE: docker-compose.yml itself IS pushed to GitHub (it's just a config
+#            template with no real values).
+#
+#   HOW IT WORKS:
+#     Docker Compose automatically reads the .env file in the same directory
+#     and substitutes ${VARIABLE_NAME} placeholders with real values at runtime.
+#     The .env file stays on YOUR machine only — never goes to GitHub.
+#
+#   WHAT GITHUB SEES (safe):           WHAT RUNS LOCALLY (real values):
+#     DATABASE_URL: ${DATABASE_URL}  →  DATABASE_URL: postgresql://real-url...
+#     NEXTAUTH_SECRET: ${NEXTAUTH_SECRET} → NEXTAUTH_SECRET: 5kotMgq7...
+#     (etc. for all secrets)
+#
+# ─── USAGE ───────────────────────────────────────────────────────────────────
+#
+#   First time (build image + start all containers):
+#     docker compose up --build
+#
+#   After code change (rebuild + restart):
+#     docker compose up --build
+#
+#   Start without rebuilding (use cached image):
+#     docker compose up
+#
+#   Run in background:
+#     docker compose up --build -d
+#
+#   Stop everything:
+#     docker compose down
+#
+#   Stop and delete database data:
+#     docker compose down -v
+#
+#   View logs:
+#     docker compose logs -f app
+# ==============================================================================
+
+
+# ==============================================================================
+# SERVICES — Each service = one running container
+# ==============================================================================
+services:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Container 2: projectify-postgres
+  # PostgreSQL database — starts FIRST because the app depends on it
+  # ────────────────────────────────────────────────────────────────────────────
+  postgres:
+    # Container name visible in `docker ps` output
+    container_name: projectify-postgres
+
+    # Use official PostgreSQL 16 on Alpine Linux (small, secure, production-ready)
+    # This is a pre-built image from Docker Hub — no Dockerfile needed
+    image: postgres:16-alpine
+
+    # Restart automatically if the container crashes unexpectedly
+    # "unless-stopped" = restart on crash, but NOT if you manually run `docker compose down`
+    restart: unless-stopped
+
+    # Environment variables to configure the PostgreSQL database
+    # These create the initial database, user, and password on first startup
+    # ⚠️ NOTE: These are LOCAL database credentials for your Docker environment only.
+    # They are NOT connected to your cloud Neon database (that's in DATABASE_URL).
+    # These are used when the app connects to this local postgres container.
+    environment:
+      POSTGRES_DB: projectify           # Database name to create
+      POSTGRES_USER: projectify         # Database user to create
+      POSTGRES_PASSWORD: projectify_local_password  # Password for the local DB user
+                                        # This is a local dev password — safe to leave as-is
+                                        # For production, use ${POSTGRES_PASSWORD} from .env
+
+    # Ports: host_port:container_port
+    # 5432:5432 means: container's port 5432 is mapped to your Mac's port 5432
+    # This lets you connect to the local postgres using a DB GUI (like TablePlus)
+    # from your Mac at: postgresql://projectify:projectify_local_password@localhost:5432/projectify
+    ports:
+      - "5432:5432"
+
+    # Volumes: persist database data between container restarts
+    # Without this, ALL database data is deleted when you run `docker compose down`
+    # "postgres_data" is a named volume managed by Docker (stored on your Mac's disk)
+    # "./postgres-data:/var/lib/postgresql/data" would use a local folder instead
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    # Health check: Docker will probe this command to know if postgres is ready
+    # The app container will wait until postgres passes this health check before starting
+    healthcheck:
+      # pg_isready checks if PostgreSQL is accepting connections
+      test: ["CMD-SHELL", "pg_isready -U projectify -d projectify"]
+      interval: 10s        # Check every 10 seconds
+      timeout: 5s          # Wait max 5 seconds for a response
+      retries: 5           # Mark unhealthy after 5 consecutive failures
+      start_period: 30s    # Give postgres 30 seconds to boot before checking
+
+    # Connect this container to the shared internal network
+    # All containers on the same network can reach each other by service name
+    networks:
+      - projectify-network
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Container 3: projectify-redis
+  # Redis in-memory store — used by Socket.IO for multi-instance WebSocket scaling
+  # ────────────────────────────────────────────────────────────────────────────
+  redis:
+    # Container name visible in `docker ps` output
+    container_name: projectify-redis
+
+    # Official Redis 7 on Alpine Linux — lightweight and fast
+    # Pre-built image from Docker Hub — no Dockerfile needed
+    image: redis:7-alpine
+
+    restart: unless-stopped
+
+    # Start Redis with persistence enabled (AOF = Append Only File)
+    # This saves Redis data to disk so it survives container restarts
+    # "--loglevel warning" reduces Redis log noise in your terminal
+    command: redis-server --appendonly yes --loglevel warning
+
+    # Map container port 6379 to your Mac's port 6379
+    # This lets you inspect Redis from your Mac using redis-cli
+    ports:
+      - "6379:6379"
+
+    # Persist Redis data between restarts using a named volume
+    volumes:
+      - redis_data:/data
+
+    # Health check: ping Redis to confirm it's accepting commands
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    networks:
+      - projectify-network
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Container 1: projectify-app
+  # Your Next.js + Socket.IO application — starts LAST (after postgres + redis)
+  # ────────────────────────────────────────────────────────────────────────────
+  app:
+    # Container name visible in `docker ps` output
+    container_name: projectify-app
+
+    # Build using the Dockerfile in the current directory (.)
+    # This triggers the 3-stage multi-stage build defined in ./Dockerfile
+    build:
+      context: .           # Build context = current directory (where Dockerfile is)
+      dockerfile: Dockerfile  # Name of the Dockerfile to use
+
+      # Build-time arguments for NEXT_PUBLIC_* variables
+      # These get baked into the JavaScript bundle during `next build`
+      # They are NOT secrets — they become part of the client-side JS
+      args:
+        # The public URL your users will use to access the app
+        # ${NEXT_PUBLIC_APP_URL} reads this value from your .env file
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        # The Socket.IO server URL (empty = same origin as the app)
+        NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL}
+
+    restart: unless-stopped
+
+    # Map container port 3000 to your Mac's port 3000
+    # This makes the app accessible at http://localhost:3000 in your browser
+    ports:
+      - "3000:3000"
+
+    # ─── ENVIRONMENT VARIABLES ─────────────────────────────────────────────────
+    # All values use ${VARIABLE} syntax — Docker Compose reads these from your
+    # local .env file automatically. NOTHING is hardcoded here.
+    # This file is safe to push to GitHub because it contains no real values.
+    environment:
+
+      # Node.js environment — must be "production" for optimized build
+      NODE_ENV: production
+
+      # ── Database ────────────────────────────────────────────────────────────
+      # OPTION A (Cloud DB - Neon): Use your existing cloud DATABASE_URL from .env
+      # The app will connect to your Neon cloud database directly
+      # This is the easiest option if you already have data in Neon
+      DATABASE_URL: ${DATABASE_URL}
+
+      # OPTION B (Local Docker DB): Uncomment these lines to use the local postgres
+      # container instead of your cloud Neon database.
+      # The hostname "postgres" = the postgres service name above (Docker resolves it)
+      # DATABASE_URL: "postgresql://projectify:projectify_local_password@postgres:5432/projectify?sslmode=disable"
+      # DIRECT_URL: "postgresql://projectify:projectify_local_password@postgres:5432/projectify?sslmode=disable"
+
+      # ── NextAuth / Authentication ────────────────────────────────────────────
+      # Secret key for encrypting JWT session tokens — from your .env file
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      AUTH_SECRET: ${AUTH_SECRET}
+      # The URL NextAuth uses internally for callbacks and redirects
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+
+      # ── Public App URL ───────────────────────────────────────────────────────
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      APP_URL: ${APP_URL}
+
+      # ── Socket.IO ────────────────────────────────────────────────────────────
+      # Empty string = Socket.IO connects to same origin (same server)
+      NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL}
+
+      # ── Redis ────────────────────────────────────────────────────────────────
+      # "redis" is the service name of Container 3 above
+      # Docker Compose's internal DNS resolves "redis" → Container 3's IP
+      # This replaces "localhost:6379" which would NOT work inside Docker
+      REDIS_URL: "redis://redis:6379"
+
+      # ── Message Encryption ────────────────────────────────────────────────────
+      # AES-256 key for encrypting chat messages before storing in database
+      MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY}
+
+      # ── Cloudflare R2 Storage ─────────────────────────────────────────────────
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME}
+      R2_API_TOKEN: ${R2_API_TOKEN}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL}
+
+      # ── Cohere AI ─────────────────────────────────────────────────────────────
+      cohere_api_key: ${cohere_api_key}
+      COHERE_MODEL: ${COHERE_MODEL}
+
+      # ── Pinecone Vector Database ──────────────────────────────────────────────
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME}
+      PINECONE_SUPERVISORS_INDEX_NAME: ${PINECONE_SUPERVISORS_INDEX_NAME}
+
+      # ── Brevo Email Service ───────────────────────────────────────────────────
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL}
+
+      # ── Gmail SMTP (Nodemailer fallback) ──────────────────────────────────────
+      GMAIL_SMTP_USER: ${GMAIL_SMTP_USER}
+      GMAIL_SMTP_PASS: ${GMAIL_SMTP_PASS}
+      EMAIL_FROM: ${EMAIL_FROM}
+
+    # depends_on ensures Docker starts postgres and redis containers FIRST,
+    # and waits for their health checks to pass before starting the app container.
+    # Without this, the app might try to connect to postgres before it's ready.
+    depends_on:
+      postgres:
+        condition: service_healthy   # Wait until postgres passes its health check
+      redis:
+        condition: service_healthy   # Wait until redis passes its health check
+
+    # Health check for the app container
+    # Calls the /api/health endpoint built into Projectify
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s    # Give app 60s to boot (Next.js startup takes time)
+
+    networks:
+      - projectify-network
+
+
+# ==============================================================================
+# VOLUMES
+# Named volumes are managed by Docker and persist data on your Mac's disk.
+# Data survives `docker compose down` but is deleted with `docker compose down -v`
+# ==============================================================================
+volumes:
+  # Stores all PostgreSQL database tables, rows, and indexes
+  postgres_data:
+    driver: local    # Stored locally on your machine (default)
+
+  # Stores Redis AOF persistence file (chat events, session cache etc.)
+  redis_data:
+    driver: local
+
+
+# ==============================================================================
+# NETWORKS
+# A private internal network that ONLY these 3 containers can see.
+# Containers on this network talk to each other using service names as hostnames:
+#   "postgres" → resolves to Container 2's internal IP
+#   "redis"    → resolves to Container 3's internal IP
+#   "app"      → resolves to Container 1's internal IP
+# Nothing outside Docker can access this network directly.
+# ==============================================================================
+networks:
+  projectify-network:
+    driver: bridge   # Standard Docker network mode (isolated bridge network)

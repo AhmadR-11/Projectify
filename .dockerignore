@@ -1,0 +1,166 @@
+# ==============================================================================
+# PROJECTIFY — .dockerignore
+# ==============================================================================
+#
+# This file controls what gets EXCLUDED from the Docker build context.
+# The build context is the set of files Docker sends to the Docker daemon
+# when you run `docker build .`.
+#
+# WHY THIS MATTERS:
+#   - node_modules alone is ~500MB+ — excluding it prevents it from being
+#     uploaded to the Docker daemon (build context) on every build.
+#   - Docker installs fresh dependencies INSIDE the container via npm ci.
+#   - Excluding .env files prevents secrets from accidentally leaking
+#     into the Docker image layers.
+#   - Smaller build context = faster `docker build` commands.
+#
+# RULE: Exclude anything that is either:
+#   a) Regenerated inside the container during build (node_modules, .next)
+#   b) Not needed to run the application (docs, tests, IDE configs)
+#   c) A security risk if baked into the image (.env files, certificates)
+# ==============================================================================
+
+
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+# node_modules is reinstalled fresh inside the container via `npm ci`
+# Including it would bloat the build context by hundreds of MBs
+node_modules
+.pnp
+.pnp.js
+
+
+# ─── Next.js Build Output ─────────────────────────────────────────────────────
+# .next is generated fresh inside the container during `npm run build`
+# Local .next may differ from production build (different env vars)
+.next
+out
+
+
+# ─── Environment & Secrets ────────────────────────────────────────────────────
+# CRITICAL: Never include real .env files in Docker images.
+# Secrets are injected at runtime via:
+#   - docker run --env-file .env  (local dev)
+#   - Kubernetes Secrets          (production)
+#   - Jenkins credentials binding  (CI/CD pipeline)
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+# .env.example IS safe to include (contains no real secrets, just placeholders)
+# but it's also not needed at runtime, so exclude it too
+.env.example
+
+
+# ─── Git Repository Data ──────────────────────────────────────────────────────
+# .git directory can be very large and is never needed inside a container
+.git
+.gitignore
+.gitattributes
+.github
+
+
+# ─── Development & DevOps Infrastructure ─────────────────────────────────────
+# The infra/ directory contains Terraform, K8s manifests, etc.
+# These are never needed inside the application Docker image
+infra/
+Jenkinsfile
+docker-compose*.yml
+.dockerignore
+
+
+# ─── OS / System Files ────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+
+# ─── IDE & Editor Configs ─────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+.project
+.settings/
+*.code-workspace
+
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ─── TypeScript Build Cache ────────────────────────────────────────────────────
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+coverage/
+__tests__/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+
+
+# ─── Misc Build Artifacts ─────────────────────────────────────────────────────
+build/
+dist/
+.cache/
+.temp/
+.tmp/
+*.bak
+*.backup
+*.map
+
+
+# ─── Certificates & Keys ──────────────────────────────────────────────────────
+# NEVER bake SSL certificates or private keys into Docker images
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+
+# ─── Documentation ────────────────────────────────────────────────────────────
+# README and docs are not needed at runtime
+README.md
+mem.md
+implementation.md
+docs/
+
+
+# ─── Prisma Specific ──────────────────────────────────────────────────────────
+# Local SQLite dev databases should not go into production images
+prisma/*.db
+prisma/*.db-journal
+
+
+# ─── Profile Images (Local) ───────────────────────────────────────────────────
+# Profile images are stored in Cloudflare R2 in production
+# The local profileimage/ folder is only for development fallback
+profileimage/
+
+
+# ─── Vercel / Railway Config ──────────────────────────────────────────────────
+# Deployment platform configs are not needed inside the Docker image
+.vercel
+vercel.json
+railway.json
+nixpacks.toml
