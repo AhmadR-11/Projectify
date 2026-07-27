@@ -73,7 +73,7 @@ pipeline {
                 echo '🧹 [Stage 3/6] Installing dependencies and running ESLint...'
                 sh '''
                     npm ci
-                    npm run lint || echo "⚠️ Linting finished with warnings."
+                    CI=true npm run lint || echo "⚠️ Linting finished with warnings."
                 '''
             }
         }
@@ -85,6 +85,8 @@ pipeline {
             steps {
                 echo '🗄️ [Stage 4/6] Validating Prisma database schema...'
                 sh '''
+                    DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
+                    DIRECT_URL="postgresql://user:pass@localhost:5432/db" \
                     npx prisma validate
                 '''
             }
