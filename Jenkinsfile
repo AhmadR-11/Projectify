@@ -1,5 +1,5 @@
 // ==============================================================================
-// PROJECTIFY — DECLARATIVE JENKINS PIPELINE
+// PROJECTIFY — DECLARATIVE JENKINS PIPELINE (CI/CD)
 // ==============================================================================
 //
 // PURPOSE:
