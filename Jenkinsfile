@@ -66,12 +66,13 @@ pipeline {
         }
 
         // ──────────────────────────────────────────────────────────────────────
-        // STAGE 3: Lint & Syntax Check
+        // STAGE 3: Install & Lint
         // ──────────────────────────────────────────────────────────────────────
-        stage('Lint & Quality Check') {
+        stage('Install & Lint') {
             steps {
-                echo '🧹 [Stage 3/6] Running ESLint and code checks...'
+                echo '🧹 [Stage 3/6] Installing dependencies and running ESLint...'
                 sh '''
+                    npm ci
                     npm run lint || echo "⚠️ Linting finished with warnings."
                 '''
             }
