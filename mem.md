@@ -246,8 +246,8 @@ Projectify/                         ← Root repository (GitHub: AhmadR-11/Proje
 - [x] **Phase 1**: Write `Dockerfile` + `docker-compose.yml` (app + postgres + redis) — test locally
 - [x] **Phase 2**: Set up Jenkins server (local / Docker container)
 - [x] **Phase 3**: Write `Jenkinsfile` with stages (Checkout → Lint → Prisma Validate → Docker Build → Health Test)
-- [ ] **Phase 4**: Write Terraform configs (`main.tf`) to provision AWS: VPC, ECR, RDS, ElastiCache, EKS
-- [ ] **Phase 5**: Write Kubernetes manifests (`deployment.yaml`, `service.yaml`, `ingress.yaml`, `configmap.yaml`, `secrets.yaml`)
+- [x] **Phase 4**: Write Terraform configs (`infra/terraform/`) to provision AWS: VPC, ECR, RDS, ElastiCache, EKS
+- [x] **Phase 5**: Write Kubernetes manifests (`infra/kubernetes/`: `deployment.yaml`, `service.yaml`, `ingress.yaml`, `configmap.yaml`, `secrets.yaml`)
 - [ ] **Phase 6**: Configure AWS ALB Ingress Controller + ACM SSL certificate
 - [ ] **Phase 7**: Point Route 53 domain to ALB for public URL
 - [ ] **Phase 8**: Deploy Prometheus + Grafana inside EKS + add `/metrics` endpoint to Next.js app

@@ -1,0 +1,86 @@
+# ==============================================================================
+# PROJECTIFY — KUBERNETES PRODUCTION DEPLOYMENT
+# ==============================================================================
+#
+# PURPOSE:
+#   Manages production pods running the Projectify Docker container.
+#   Provides multi-replica high availability, zero-downtime rolling updates,
+#   liveness/readiness health probes, and automatic pod restarts.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: projectify-app
+  namespace: default
+  labels:
+    app: projectify-app
+    app.kubernetes.io/name: projectify
+    app.kubernetes.io/part-of: projectify-platform
+spec:
+  # 1 pod replica optimized for lightweight t3.micro EC2 worker nodes
+  replicas: 1
+
+  # Rolling update strategy ensures zero downtime during new deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1       # Create 1 new pod before killing an old one
+      maxUnavailable: 0 # Never have fewer than 2 active pods
+
+  selector:
+    matchLabels:
+      app: projectify-app
+
+  template:
+    metadata:
+      labels:
+        app: projectify-app
+    spec:
+      containers:
+        - name: projectify-app
+          # Image URL from AWS ECR
+          image: 867490540447.dkr.ecr.us-east-1.amazonaws.com/projectify-app:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          # Inject environment variables from ConfigMap & Secret
+          envFrom:
+            - configMapRef:
+                name: projectify-config
+            - secretRef:
+                name: projectify-secrets
+
+          # Resource allocation requests and hard caps per pod
+          resources:
+            requests:
+              cpu: "250m"      # Quarter of a CPU core
+              memory: "256Mi"  # 256 Megabytes RAM
+            limits:
+              cpu: "500m"      # Half a CPU core max
+              memory: "512Mi"  # 512 Megabytes RAM max
+
+          # Readiness Probe: Ensures pod receives traffic only when app is ready
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+
+          # Liveness Probe: Restarts pod automatically if application freezes
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3

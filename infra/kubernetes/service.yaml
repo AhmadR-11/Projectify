@@ -1,0 +1,27 @@
+# ==============================================================================
+# PROJECTIFY — KUBERNETES SERVICE
+# ==============================================================================
+#
+# PURPOSE:
+#   Provides stable internal network entrypoint (ClusterIP) and load balances
+#   incoming HTTP traffic across all healthy Projectify application pods.
+# ==============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: projectify-service
+  namespace: default
+  labels:
+    app: projectify-app
+    app.kubernetes.io/name: projectify
+    app.kubernetes.io/part-of: projectify-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: projectify-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP

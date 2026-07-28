@@ -96,3 +96,20 @@ __tests__/
 # Viva Defense / Implementation Guide
 /implementation.md
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Terraform (Infrastructure as Code)
+# ──────────────────────────────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Kubernetes Secrets
+# ──────────────────────────────────────────────────────────────────────────────
+infra/kubernetes/secrets.yaml
+!infra/kubernetes/secrets.yaml.example
+

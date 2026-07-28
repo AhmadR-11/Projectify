@@ -1,0 +1,21 @@
+# ==============================================================================
+# PROJECTIFY — EXAMPLE TERRAFORM VARIABLES TEMPLATE
+# ==============================================================================
+#
+# Copy this file to "terraform.tfvars" and replace values with your secrets.
+# NEVER commit "terraform.tfvars" to git (it is listed in .gitignore).
+# ==============================================================================
+
+aws_region           = "us-east-1"
+environment          = "prod"
+project_name         = "projectify"
+
+# Database credentials
+db_name              = "projectify"
+db_username          = "projectify_admin"
+db_password          = "SuperSecretPassword123!" # Change to a strong password
+
+# EKS settings
+eks_cluster_name     = "projectify-eks-cluster"
+node_instance_type   = "t3.medium"
+node_group_desired_size = 2

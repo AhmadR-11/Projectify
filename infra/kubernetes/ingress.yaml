@@ -1,0 +1,36 @@
+# ==============================================================================
+# PROJECTIFY — KUBERNETES INGRESS (AWS ALB INTEGRATION)
+# ==============================================================================
+#
+# PURPOSE:
+#   Routes external HTTP/HTTPS web traffic from AWS Application Load Balancer (ALB)
+#   to the internal projectify-service Kubernetes Service.
+# ==============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: projectify-ingress
+  namespace: default
+  annotations:
+    # Specifies that AWS Load Balancer Controller manages this load balancer
+    kubernetes.io/ingress.class: "alb"
+    alb.ingress.kubernetes.io/scheme: "internet-facing"
+    alb.ingress.kubernetes.io/target-type: "ip"
+    alb.ingress.kubernetes.io/healthcheck-path: "/api/health"
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: projectify-service
+                port:
+                  number: 80

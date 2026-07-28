@@ -1,0 +1,23 @@
+# ==============================================================================
+# PROJECTIFY — KUBERNETES CONFIGMAP
+# ==============================================================================
+#
+# PURPOSE:
+#   Stores non-sensitive application environment variables.
+#   Mounted into Projectify application pods at runtime.
+# ==============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: projectify-config
+  namespace: default
+  labels:
+    app.kubernetes.io/name: projectify
+    app.kubernetes.io/part-of: projectify-platform
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  NEXT_TELEMETRY_DISABLED: "1"
+  NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+  NEXT_PUBLIC_SOCKET_URL: "http://localhost:3000"
