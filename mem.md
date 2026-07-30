@@ -230,7 +230,7 @@ Projectify/                         ← Root repository (GitHub: AhmadR-11/Proje
 - Admin dashboard: campus management, coordinator assignment
 - Full README.md written with architecture diagram
 
-### ✅ Done (DevOps Planning, Infrastructure & Deployment - Phases 1 to 6)
+### ✅ Done (DevOps Planning, Infrastructure & Deployment - Phases 1 to 7)
 - DevOps tool selection finalized (Jenkins, Docker, Docker Compose, Kubernetes, Terraform, AWS, Prometheus, Grafana)
 - Complete DevOps flow documented (push → Jenkins → Terraform → Docker → ECR → EKS → Monitoring)
 - Monorepo structure for `infra/` folder designed (`infra/terraform/` and `infra/kubernetes/`)
@@ -240,6 +240,7 @@ Projectify/                         ← Root repository (GitHub: AhmadR-11/Proje
 - **Phase 4 (Terraform AWS IaC)**: Provisioned live AWS VPC (Multi-AZ), ECR repo (`867490540447.dkr.ecr.us-east-1.amazonaws.com/projectify-app`), RDS PostgreSQL 16 (`projectify-db`), ElastiCache Redis (`projectify-redis`), and EKS Kubernetes Cluster (`projectify-eks-cluster`).
 - **Phase 5 (Kubernetes Manifests & Deployment)**: Production manifests created (`configmap.yaml`, `secrets.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml`). Pod `projectify-app-5d4c7d8c57-g4vkf` status **`1/1 Running`** live on AWS EKS.
 - **Phase 6 (Public AWS Load Balancer)**: Configured LoadBalancer Service (`projectify-service`) exposing live public URL (`http://a0b5f7996d0d943338d87f37052a4ed2-242634869.us-east-1.elb.amazonaws.com`).
+- **Phase 7 (Custom Domain Routing & SSL Setup)**: Configured custom domain mapping (`infra/terraform/route53.tf`) & DuckDNS CNAME routing to AWS Load Balancer endpoint.
 
 ### 🔲 DevOps Implementation Roadmap
 - [x] **Phase 1**: Write `Dockerfile` + `docker-compose.yml` (app + postgres + redis) — test locally
@@ -248,7 +249,7 @@ Projectify/                         ← Root repository (GitHub: AhmadR-11/Proje
 - [x] **Phase 4**: Write Terraform configs (`infra/terraform/`) to provision AWS: VPC, ECR, RDS, ElastiCache, EKS
 - [x] **Phase 5**: Write Kubernetes manifests (`infra/kubernetes/`: `deployment.yaml`, `service.yaml`, `ingress.yaml`, `configmap.yaml`, `secrets.yaml`)
 - [x] **Phase 6**: Configure AWS Load Balancer (`projectify-service`: `http://a0b5f7996d0d943338d87f37052a4ed2-242634869.us-east-1.elb.amazonaws.com`)
-- [ ] **Phase 7**: Point Route 53 domain to ALB for public URL
+- [x] **Phase 7**: Point custom domain (Route 53 / DuckDNS) to AWS Load Balancer for public URL
 - [ ] **Phase 8**: Deploy Prometheus + Grafana inside EKS + add `/metrics` endpoint to Next.js app
 
 ---

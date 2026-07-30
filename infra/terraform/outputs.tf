@@ -48,3 +48,15 @@ output "redis_endpoint" {
   value       = aws_elasticache_cluster.redis.cache_nodes[0].address
   description = "ElastiCache Redis primary node address."
 }
+
+# Route 53 Name Servers (for domain registrar NS delegation)
+output "route53_name_servers" {
+  value       = length(aws_route53_zone.main) > 0 ? aws_route53_zone.main[0].name_servers : []
+  description = "Route 53 Name Servers to configure at your domain registrar."
+}
+
+# ACM SSL Certificate ARN
+output "acm_certificate_arn" {
+  value       = length(aws_acm_certificate.ssl) > 0 ? aws_acm_certificate.ssl[0].arn : ""
+  description = "ACM SSL/TLS Certificate ARN."
+}

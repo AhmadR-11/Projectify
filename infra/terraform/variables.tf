@@ -26,6 +26,12 @@ variable "project_name" {
   description = "Project name prefix used for naming resources."
 }
 
+variable "domain_name" {
+  type        = string
+  default     = ""
+  description = "Optional custom domain name for Route 53 DNS and ACM SSL certificate."
+}
+
 # ─── Networking (VPC) Settings ────────────────────────────────────────────────
 variable "vpc_cidr" {
   type        = string
