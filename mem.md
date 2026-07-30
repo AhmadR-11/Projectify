@@ -230,17 +230,16 @@ Projectify/                         ← Root repository (GitHub: AhmadR-11/Proje
 - Admin dashboard: campus management, coordinator assignment
 - Full README.md written with architecture diagram
 
-### ✅ Done (DevOps Planning & Containerization - Phase 1)
+### ✅ Done (DevOps Planning, Infrastructure & Deployment - Phases 1 to 6)
 - DevOps tool selection finalized (Jenkins, Docker, Docker Compose, Kubernetes, Terraform, AWS, Prometheus, Grafana)
 - Complete DevOps flow documented (push → Jenkins → Terraform → Docker → ECR → EKS → Monitoring)
-- Public URL deployment strategy documented (AWS ALB + Route 53 + ACM SSL)
-- Monorepo structure for `infra/` folder designed
-- `.gitignore` fixed (node_modules properly excluded from git tracking)
-- Nested Projectify folder issue resolved (inner Projectify/ removed, all files moved to root)
-- **Production Multi-Stage `Dockerfile` created**: 4-stage build (`deps`, `prod-deps`, `builder`, `runner`) with non-root security (`nextjs`), `dumb-init` PID 1, and health checks.
-- **`docker-compose.yml` created**: Orchestrates 3 services (`projectify-app`, `projectify-postgres`, `projectify-redis`) with runtime environment variable substitution (zero hardcoded secrets).
-- **`.dockerignore` created**: Excludes `node_modules`, `.next`, `.env`, build artifacts, and OS files to minimize build context.
-- **Prisma Engine Optimization**: Configured `binaryTargets = ["native", "linux-musl-openssl-3.0.x"]` in `schema.prisma` to prune unused cross-platform binaries.
+- Monorepo structure for `infra/` folder designed (`infra/terraform/` and `infra/kubernetes/`)
+- `.gitignore` updated (node_modules, `.terraform/`, `*.tfstate`, `terraform.tfvars`, `secrets.yaml` securely excluded)
+- **Phase 1 (Docker Containerization)**: Multi-stage `Dockerfile` (350MB lean build, non-root `nextjs` user, `dumb-init`) + `docker-compose.yml` (App + Postgres + Redis).
+- **Phase 2 & 3 (Jenkins CI/CD Pipeline)**: Automated `Jenkinsfile` pipeline with 7 stages (Checkout → Verify → Lint → Validate → Docker Build → Health Test → Cleanup) verified & running on `http://localhost:8080`.
+- **Phase 4 (Terraform AWS IaC)**: Provisioned live AWS VPC (Multi-AZ), ECR repo (`867490540447.dkr.ecr.us-east-1.amazonaws.com/projectify-app`), RDS PostgreSQL 16 (`projectify-db`), ElastiCache Redis (`projectify-redis`), and EKS Kubernetes Cluster (`projectify-eks-cluster`).
+- **Phase 5 (Kubernetes Manifests & Deployment)**: Production manifests created (`configmap.yaml`, `secrets.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml`). Pod `projectify-app-5d4c7d8c57-g4vkf` status **`1/1 Running`** live on AWS EKS.
+- **Phase 6 (Public AWS Load Balancer)**: Configured LoadBalancer Service (`projectify-service`) exposing live public URL (`http://a0b5f7996d0d943338d87f37052a4ed2-242634869.us-east-1.elb.amazonaws.com`).
 
 ### 🔲 DevOps Implementation Roadmap
 - [x] **Phase 1**: Write `Dockerfile` + `docker-compose.yml` (app + postgres + redis) — test locally
@@ -248,7 +247,7 @@ Projectify/                         ← Root repository (GitHub: AhmadR-11/Proje
 - [x] **Phase 3**: Write `Jenkinsfile` with stages (Checkout → Lint → Prisma Validate → Docker Build → Health Test)
 - [x] **Phase 4**: Write Terraform configs (`infra/terraform/`) to provision AWS: VPC, ECR, RDS, ElastiCache, EKS
 - [x] **Phase 5**: Write Kubernetes manifests (`infra/kubernetes/`: `deployment.yaml`, `service.yaml`, `ingress.yaml`, `configmap.yaml`, `secrets.yaml`)
-- [ ] **Phase 6**: Configure AWS ALB Ingress Controller + ACM SSL certificate
+- [x] **Phase 6**: Configure AWS Load Balancer (`projectify-service`: `http://a0b5f7996d0d943338d87f37052a4ed2-242634869.us-east-1.elb.amazonaws.com`)
 - [ ] **Phase 7**: Point Route 53 domain to ALB for public URL
 - [ ] **Phase 8**: Deploy Prometheus + Grafana inside EKS + add `/metrics` endpoint to Next.js app
 

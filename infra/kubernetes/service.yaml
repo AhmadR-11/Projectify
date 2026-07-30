@@ -17,7 +17,7 @@ metadata:
     app.kubernetes.io/name: projectify
     app.kubernetes.io/part-of: projectify-platform
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: projectify-app
   ports:
