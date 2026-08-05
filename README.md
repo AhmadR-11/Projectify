@@ -12,6 +12,13 @@
 [![Prisma](https://img.shields.io/badge/Prisma-5.14-2D3748?logo=prisma)](https://prisma.io)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-4.8-black?logo=socketdotio)](https://socket.io)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38bdf8?logo=tailwindcss)](https://tailwindcss.com)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker)](https://docker.com)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-EKS-326CE5?logo=kubernetes)](https://kubernetes.io)
+[![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform)](https://terraform.io)
+[![Jenkins](https://img.shields.io/badge/Jenkins-CI/CD-D24939?logo=jenkins)](https://jenkins.io)
+[![AWS](https://img.shields.io/badge/AWS-Cloud-FF9900?logo=amazonaws)](https://aws.amazon.com)
+[![Prometheus](https://img.shields.io/badge/Prometheus-Monitoring-E6522C?logo=prometheus)](https://prometheus.io)
+[![Grafana](https://img.shields.io/badge/Grafana-Dashboards-F46800?logo=grafana)](https://grafana.com)
 
 </div>
 
@@ -26,6 +33,7 @@
 - [User Roles](#-user-roles)
 - [AI Pipeline](#-ai-pipeline)
 - [Database Schema](#-database-schema)
+- [DevOps & Infrastructure](#-devops--infrastructure)
 - [Project Structure](#-project-structure)
 - [Environment Variables](#-environment-variables)
 - [Getting Started](#-getting-started)
@@ -206,6 +214,25 @@ Projectify follows a **Layered Monolith with Real-Time Extension** architecture 
 | **SWC** | Rust-based fast minification (`swcMinify: true`) |
 | **nixpacks.toml** | Railway build configuration |
 
+### DevOps & Infrastructure
+
+| Technology | Version | Purpose |
+|---|---|---|
+| **Docker** | Latest | Multi-stage containerization (350MB lean image) |
+| **Docker Compose** | 3.8 | Local development stack (App + PostgreSQL + Redis) |
+| **Jenkins** | Latest | CI/CD pipeline (7 automated stages) |
+| **Terraform** | ≥1.0 | Infrastructure as Code (AWS provisioning) |
+| **Kubernetes** | 1.30 (EKS) | Container orchestration |
+| **Helm** | Latest | Kubernetes package manager (Prometheus, Grafana) |
+| **AWS EKS** | 1.30 | Managed Kubernetes cluster |
+| **AWS RDS** | PostgreSQL 16 | Managed relational database |
+| **AWS ElastiCache** | Redis | Managed Redis for WebSocket scaling |
+| **AWS ECR** | - | Docker image registry |
+| **AWS Route 53** | - | DNS zone management |
+| **AWS ACM** | - | Free SSL/TLS certificates |
+| **Prometheus** | Latest | Cluster metrics collection |
+| **Grafana** | Latest | Monitoring dashboards |
+
 ---
 
 ## 🌟 Key Features
@@ -374,6 +401,128 @@ Key design decisions:
 
 ---
 
+## 🏗️ DevOps & Infrastructure
+
+Projectify implements a complete, production-grade DevOps pipeline spanning containerization, CI/CD automation, cloud infrastructure provisioning, Kubernetes orchestration, and monitoring.
+
+### DevOps Pipeline Flow
+
+```
+Developer pushes code to GitHub
+        ↓
+Jenkins detects change (webhook / poll)
+        ↓
+┌──────────────────────────────────────────────────────────┐
+│  JENKINS CI/CD PIPELINE (Jenkinsfile - 7 Stages)         │
+│                                                          │
+│  1. Checkout       → Clone repository                    │
+│  2. Verify         → Check Node.js, npm, Docker          │
+│  3. Lint           → ESLint code quality check            │
+│  4. Validate       → Prisma schema validation             │
+│  5. Docker Build   → Multi-stage image build              │
+│  6. Health Test    → Container health check               │
+│  7. Cleanup        → Remove dangling images               │
+└──────────────────────────────────────────────────────────┘
+        ↓
+Docker image pushed to AWS ECR
+        ↓
+┌──────────────────────────────────────────────────────────┐
+│  AWS INFRASTRUCTURE (Terraform IaC)                      │
+│                                                          │
+│  VPC (Multi-AZ) → EKS Cluster → RDS PostgreSQL           │
+│  ElastiCache Redis → ECR Registry → Route 53 DNS         │
+│  IAM Roles → ACM SSL Certificates                        │
+└──────────────────────────────────────────────────────────┘
+        ↓
+┌──────────────────────────────────────────────────────────┐
+│  KUBERNETES (EKS)                                        │
+│                                                          │
+│  Deployment (3 replicas) → Service (LoadBalancer)        │
+│  ConfigMap + Secrets → Rolling Updates                   │
+│  Prometheus + Grafana (monitoring namespace)              │
+└──────────────────────────────────────────────────────────┘
+        ↓
+Public URL via AWS Load Balancer + DuckDNS/Route 53 DNS
+```
+
+### Phase 1: Docker Containerization
+
+| Component | Details |
+|---|---|
+| **Dockerfile** | Multi-stage build (deps → build → runtime), `~350MB` final image |
+| **Base Image** | `node:18-alpine` with `dumb-init` for proper signal handling |
+| **Security** | Non-root `nextjs` user (UID 1001) |
+| **docker-compose.yml** | 3-service local stack: App (port 3000) + PostgreSQL 15 (port 5432) + Redis 7 (port 6379) |
+
+### Phase 2 & 3: Jenkins CI/CD Pipeline
+
+| Stage | Action |
+|---|---|
+| **Checkout** | Clone GitHub repository |
+| **Verify** | Validate Node.js, npm, and Docker CLI availability |
+| **Lint** | Run `next lint` for code quality |
+| **Validate** | Run `npx prisma validate` for schema integrity |
+| **Docker Build** | Build multi-stage Docker image |
+| **Health Test** | Start container, wait for HTTP 200 on `/api/health` |
+| **Cleanup** | Remove dangling Docker images |
+
+Jenkins runs locally in a Docker container on `http://localhost:8080`.
+
+### Phase 4: Terraform Infrastructure as Code
+
+All AWS infrastructure is defined declaratively in `infra/terraform/`:
+
+| File | Resource | Spec |
+|---|---|---|
+| `vpc.tf` | VPC + Subnets | 2 public + 2 private subnets across 2 AZs, NAT Gateway, Internet Gateway |
+| `eks.tf` | EKS Cluster | Kubernetes 1.30, managed node group (`t3.micro` × 2) |
+| `rds.tf` | RDS PostgreSQL | PostgreSQL 16, `db.t3.micro`, Multi-AZ ready |
+| `elasticache.tf` | ElastiCache Redis | `cache.t3.micro`, single-node for Socket.IO adapter |
+| `ecr.tf` | ECR Repository | Docker image registry (`projectify-app`) |
+| `route53.tf` | Route 53 + ACM | DNS zone + SSL certificate provisioning |
+| `alb_controller_iam.tf` | IAM Roles | Service roles for AWS Load Balancer Controller |
+| `variables.tf` | Input Variables | Region, CIDR blocks, DB credentials, domain name |
+| `outputs.tf` | Output Values | Cluster endpoint, DB endpoint, Redis endpoint, ECR URL |
+
+### Phase 5: Kubernetes Manifests
+
+Production manifests in `infra/kubernetes/`:
+
+| Manifest | Purpose |
+|---|---|
+| `deployment.yaml` | App deployment with rolling update strategy, liveness/readiness probes, resource limits |
+| `service.yaml` | LoadBalancer Service exposing port 80 → container port 3000 |
+| `configmap.yaml` | Non-secret environment variables (app URL, socket config) |
+| `secrets.yaml` | Base64-encoded secrets (DB URL, API keys, encryption keys) |
+| `ingress.yaml` | Ingress rules for domain-based routing |
+| `aws-load-balancer-controller.yaml` | Helm values for AWS LB Controller |
+
+### Phase 6: AWS Load Balancer
+
+Kubernetes Service of type `LoadBalancer` provisions an AWS Classic Load Balancer that:
+- Accepts public HTTP traffic on port 80
+- Forwards to EKS node port → pod port 3000
+- Supports WebSocket connections for Socket.IO
+
+### Phase 7: DNS & SSL
+
+- **DuckDNS**: Free domain CNAME pointing to AWS Load Balancer DNS
+- **Route 53**: Hosted zone for custom domain management
+- **ACM**: AWS Certificate Manager for free SSL/TLS certificate provisioning
+
+### Phase 8: Monitoring (Prometheus & Grafana)
+
+| Component | Purpose |
+|---|---|
+| **Prometheus** | Scrapes cluster-wide metrics (CPU, memory, pod health, node stats) |
+| **Grafana** | Visual dashboards for real-time cluster & application monitoring |
+| **kube-state-metrics** | Kubernetes object metrics (deployments, pods, replica sets) |
+| **node-exporter** | Node-level hardware and OS metrics |
+
+Deployed via `kube-prometheus-stack` Helm chart into the `monitoring` namespace. Access Grafana via `kubectl port-forward`.
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -472,6 +621,32 @@ Projectify/
 ├── pages/                        # Legacy Pages Router (if any)
 ├── profileimage/                 # Local profile image storage
 │
+├── infra/                        # DevOps infrastructure
+│   ├── kubernetes/               # Kubernetes manifests for EKS
+│   │   ├── deployment.yaml       # App Deployment (rolling update, health probes)
+│   │   ├── service.yaml          # LoadBalancer Service (port 80 → 3000)
+│   │   ├── ingress.yaml          # Ingress rules for domain routing
+│   │   ├── configmap.yaml        # Non-secret environment variables
+│   │   ├── secrets.yaml          # Base64-encoded secrets (gitignored)
+│   │   ├── secrets.yaml.example  # Template for secrets
+│   │   └── aws-load-balancer-controller.yaml  # AWS LB Controller config
+│   └── terraform/                # Terraform IaC for AWS
+│       ├── providers.tf          # AWS provider configuration
+│       ├── vpc.tf                # VPC, subnets, NAT, IGW
+│       ├── eks.tf                # EKS cluster + node group
+│       ├── rds.tf                # RDS PostgreSQL 16
+│       ├── elasticache.tf        # ElastiCache Redis
+│       ├── ecr.tf                # ECR Docker registry
+│       ├── route53.tf            # Route 53 DNS + ACM SSL
+│       ├── alb_controller_iam.tf # IAM roles for LB Controller
+│       ├── variables.tf          # Input variables
+│       ├── outputs.tf            # Output values
+│       ├── terraform.tfvars.example  # Variable values template
+│       └── terraform.tfvars      # Actual values (gitignored)
+│
+├── Dockerfile                    # Multi-stage Docker build (350MB, non-root)
+├── docker-compose.yml            # Local dev stack (App + Postgres + Redis)
+├── Jenkinsfile                   # CI/CD pipeline (7 stages)
 ├── server.js                     # Custom Node.js server (HTTP + Socket.IO)
 ├── middleware.ts                  # Auth + RBAC middleware (edge-compatible)
 ├── next.config.mjs               # Next.js configuration
@@ -581,7 +756,58 @@ The server starts at [http://localhost:3000](http://localhost:3000)
 
 ## ☁️ Deployment
 
-### Railway *(Recommended)*
+Projectify supports multiple deployment targets:
+
+### AWS EKS *(Production)*
+
+Full Kubernetes deployment on AWS with Terraform-managed infrastructure:
+
+```bash
+# 1. Provision AWS infrastructure
+cd infra/terraform
+terraform init
+terraform apply -auto-approve
+
+# 2. Configure kubectl
+aws eks update-kubeconfig --name projectify-eks-cluster --region us-east-1
+
+# 3. Build & push Docker image to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+docker build -t projectify-app .
+docker tag projectify-app:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/projectify-app:latest
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/projectify-app:latest
+
+# 4. Deploy to Kubernetes
+cd ../kubernetes
+kubectl apply -f configmap.yaml
+kubectl apply -f secrets.yaml
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# 5. Initialize database
+kubectl exec -it $(kubectl get pods -l app=projectify -o jsonpath='{.items[0].metadata.name}') -- npx prisma db push
+kubectl exec -it $(kubectl get pods -l app=projectify -o jsonpath='{.items[0].metadata.name}') -- node prisma/seed.js
+
+# 6. Install monitoring stack
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace
+
+# 7. Access Grafana dashboards
+kubectl port-forward svc/prometheus-grafana -n monitoring 3001:80
+# Open http://localhost:3001 (admin / prom-operator)
+```
+
+### Docker Compose *(Local Development)*
+
+```bash
+# Start all services (App + PostgreSQL + Redis)
+docker-compose up --build
+
+# App available at http://localhost:3000
+```
+
+### Railway *(PaaS Deployment)*
 
 The project includes pre-configured Railway deployment files:
 
@@ -600,6 +826,17 @@ Start command: `node server.js`
 > ⚠️ **Note**: Socket.IO WebSockets require a persistent server and do **not** work on Vercel's serverless Edge functions. Real-time features will be limited on Vercel deployments.
 
 `vercel.json` is provided for static routes and API rewrite configuration. For full Socket.IO support, pair with a dedicated WebSocket host (Railway, Render, Fly.io).
+
+### Tear Down & Re-deploy
+
+To destroy all AWS resources and stop billing:
+
+```bash
+cd infra/terraform
+terraform destroy -auto-approve
+```
+
+To re-deploy, follow the **AWS EKS** steps above. All Terraform state and Kubernetes manifests are preserved locally.
 
 ---
 
@@ -621,7 +858,7 @@ All API routes live under `app/api/` and follow Next.js App Router conventions.
 | `/api/notifications` | Broadcast and per-user notification management |
 | `/api/invitations` | Group invitation send/accept/reject |
 | `/api/profile` | Profile view and update |
-| `/api/health` | Health check endpoint (Railway monitoring) |
+| `/api/health` | Health check endpoint (Kubernetes liveness probe) |
 | `/api/cron` | Background job triggers |
 
 ---
